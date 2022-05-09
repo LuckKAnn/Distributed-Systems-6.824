@@ -17,7 +17,18 @@ import "strconv"
 type ExampleArgs struct {
 	X int
 }
+type Request struct {
+	Id int
 
+}
+
+
+type Reply struct {
+	Id int
+	FileName  string
+	ReduceNum int
+
+}
 type ExampleReply struct {
 	Y int
 }
