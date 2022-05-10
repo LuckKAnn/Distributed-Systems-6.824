@@ -18,16 +18,28 @@ type ExampleArgs struct {
 	X int
 }
 type Request struct {
+
+
 	Id int
+	STATUS_CODE int
+	work_index int
 
 }
+
+const STATUS_REQUEST_WORK=1
+const STATUS_MAP_FINISH =2
+const STATUS_REDUCE_FINISH =3
+const STATUS_DO_REDUCE =5
+const STATUS_DO_MAP =4
+const STATUS_END =6
 
 
 type Reply struct {
 	Id int
 	FileName  string
 	ReduceNum int
-
+	STATUS_CODE int
+	Work_index int
 }
 type ExampleReply struct {
 	Y int

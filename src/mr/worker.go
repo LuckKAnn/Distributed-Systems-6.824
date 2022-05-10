@@ -4,14 +4,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"os"
+	"sort"
 	"strconv"
+	"time"
 )
 import "log"
 import "net/rpc"
 import "hash/fnv"
-
-
+type ByKey []KeyValue
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 //
 // Map functions return a slice of KeyValue.
 //
@@ -39,37 +45,105 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 	//启动RPC向master进行注册
 	//sockname := masterSock()
-	client, err := rpc.DialHTTP("tcp", "localhost:1234")
+	client, err := rpc.DialHTTP("tcp", "localhost:8088")
 	//client, err := rpc.DialHTTP("unix", sockname)
 	if err!=nil{
 		panic(err.Error())
 	}
-	requst := Request{
-		Id: 1,
+	rand.Seed(time.Now().UnixNano())
+	for  {
+
+		requst := Request{
+			Id: rand.Intn(100000000),
+			STATUS_CODE: STATUS_REQUEST_WORK,
+		}
+		var response *Reply
+		//response :=&Reply{id: 0,fileName: ""}
+		response = new(Reply)
+
+
+
+		err = client.Call("Master.Process", requst, &response)
+		log.Println(response)
+		if err !=nil {
+			panic(err.Error())
+		}
+
+		if response.STATUS_CODE==STATUS_DO_MAP {
+			//	执行map任务
+			doMapWork(response,mapf,client)
+		} else if response.STATUS_CODE==STATUS_DO_REDUCE {
+			//	执行reduce任务
+			doReduceWork(response,reducef,client)
+		} else if response.STATUS_CODE==STATUS_END{
+			//结束
+			break
+		}
 	}
-	var response *Reply
-	//response :=&Reply{id: 0,fileName: ""}
-	response = new(Reply)
 
-	err = client.Call("Master.Process", requst, &response)
-	if err !=nil {
-		panic(err.Error())
-	}
+}
 
-	fmt.Println(response.Id)
-	fmt.Println(response.FileName)
-	fmt.Println("connected")
-
+func doReduceWork(response *Reply,reducef func(string, []string) string,cli *rpc.Client){
 	if response.FileName=="" {
 		return
 	}
+	file, err := os.Open(response.FileName)
+	if err!=nil {
+		panic("wrong")
+	}
+	intermediate := []KeyValue{}
+	dec := json.NewDecoder(file)
+	for {
+		var kv KeyValue
+		if err := dec.Decode(&kv); err != nil {
+			break
+		}
+		intermediate = append(intermediate, kv)
+	}
+	sort.Sort(ByKey(intermediate))
+	work_index := response.Work_index
+	ofile, _ := os.Create("./tmp-mr-out-"+strconv.Itoa(work_index))
+	//ofile, _ := os.OpenFile("tmp-mr-out-"+string(work_index), os.O_APPEND|os.O_CREATE|os.O_RDWR, os.ModeAppend|os.ModePerm)
+
+	//ofile, _ := ioutil.TempFile("","824-mr"+string(work_index))
+
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+
+		i = j
+	}
+	ofile.Close()
+	errs := os.Rename("./tmp-mr-out-"+strconv.Itoa(work_index), "./mr-out-"+strconv.Itoa(work_index))
+	if errs !=nil{
+		fmt.Println(err.Error())
+		log.Fatalln("rename wrong")
+	}
+	//回送，表示完成reduce
+	reduceFinishRequest  :=Request{STATUS_CODE: STATUS_REDUCE_FINISH,Id: response.Id}
+	useLessResponse := Reply{}
+	err = cli.Call("Master.Process", reduceFinishRequest, &useLessResponse)
+
+}
+func doMapWork(response *Reply,mapf func(string, string) []KeyValue,cli *rpc.Client){
 
 	//接下来应该是读取文件，然后调用map函数
 	//这是什么数据结构，空数组？
 	//intermediate := []KeyValue{}
 	file, err := os.Open(response.FileName)
 	if err != nil {
-		log.Fatalf("cannot open %v", response.FileName)
+		return
 	}
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
@@ -77,27 +151,13 @@ func Worker(mapf func(string, string) []KeyValue,
 	}
 	file.Close()
 	kva := mapf(response.FileName, string(content))
-	//现在有了数据了
-	//intermediate = append(intermediate, kva...)
-	//现在要把中间文件写入到json当中
-	//jsonFile, err := os.Create("./test.json")
-	//os.OpenFile("./test.json",os.O_APPEND|os.O_CREATE,os.ModeAppend|os.ModePerm)
-	//enc := json.NewEncoder(jsonFile)
-	//for _, kv := range kva {
-	//	err := enc.Encode(&kv)
-	//	if err!=nil {
-	//		panic(err.Error())
-	//	}
-	//}
-	//
-	//jsonFile.Close()
-	//
+	//work_index := response.Work_index
 	for _, kv := range kva {
-		fmt.Println(kv.Key)
-		fmt.Println(kv.Value)
 		Y := strconv.Itoa(ihash(kv.Key)%response.ReduceNum)
-		jsonName := "./datas/mr-X-" +Y+".json"
+		//jsonName := "./datas/mr-" +strconv.Itoa(work_index)+"-"+Y+".json"
+		jsonName := "./datas/mr-x-"+Y+".json"
 		jsonFile, _ := os.OpenFile(jsonName, os.O_APPEND|os.O_CREATE|os.O_RDWR, os.ModeAppend|os.ModePerm)
+		//jsonFile, _ := os.Create(jsonName)
 		enc := json.NewEncoder(jsonFile)
 		err = enc.Encode(&kv)
 		if err != nil {
@@ -106,15 +166,12 @@ func Worker(mapf func(string, string) []KeyValue,
 		jsonFile.Close()
 	}
 
-
-
-	// Your worker implementation here.
-
-	// uncomment to send the Example RPC to the master.
-	// CallExample()
+	//回送，表示完成
+	mapfinishRequest  :=Request{STATUS_CODE: STATUS_MAP_FINISH,Id: response.Id}
+	useLessResponse := Reply{}
+	err = cli.Call("Master.Process", mapfinishRequest, &useLessResponse)
 
 }
-
 //
 // example function to show how to make an RPC call to the master.
 //
