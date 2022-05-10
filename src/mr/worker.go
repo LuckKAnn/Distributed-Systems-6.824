@@ -45,11 +45,11 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 	//启动RPC向master进行注册
 	//sockname := masterSock()
-	client, err := rpc.DialHTTP("tcp", "localhost:8088")
+	//client, err := rpc.DialHTTP("tcp", "localhost:8088")
 	//client, err := rpc.DialHTTP("unix", sockname)
-	if err!=nil{
-		panic(err.Error())
-	}
+	//if err!=nil{
+	//	panic(err.Error())
+	//}
 	rand.Seed(time.Now().UnixNano())
 	for  {
 
@@ -61,20 +61,16 @@ func Worker(mapf func(string, string) []KeyValue,
 		//response :=&Reply{id: 0,fileName: ""}
 		response = new(Reply)
 
-
-
-		err = client.Call("Master.Process", requst, &response)
+		call("Master.Process", requst, &response)
+		//err = client.Call("Master.Process", requst, &response)
 		log.Println(response)
-		if err !=nil {
-			panic(err.Error())
-		}
 
 		if response.STATUS_CODE==STATUS_DO_MAP {
 			//	执行map任务
-			doMapWork(response,mapf,client)
+			doMapWork(response,mapf)
 		} else if response.STATUS_CODE==STATUS_DO_REDUCE {
 			//	执行reduce任务
-			doReduceWork(response,reducef,client)
+			doReduceWork(response,reducef)
 		} else if response.STATUS_CODE==STATUS_END{
 			//结束
 			break
@@ -83,7 +79,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 }
 
-func doReduceWork(response *Reply,reducef func(string, []string) string,cli *rpc.Client){
+func doReduceWork(response *Reply,reducef func(string, []string) string){
 	if response.FileName=="" {
 		return
 	}
@@ -133,10 +129,10 @@ func doReduceWork(response *Reply,reducef func(string, []string) string,cli *rpc
 	//回送，表示完成reduce
 	reduceFinishRequest  :=Request{STATUS_CODE: STATUS_REDUCE_FINISH,Id: response.Id}
 	useLessResponse := Reply{}
-	err = cli.Call("Master.Process", reduceFinishRequest, &useLessResponse)
+	call("Master.Process", reduceFinishRequest, &useLessResponse)
 
 }
-func doMapWork(response *Reply,mapf func(string, string) []KeyValue,cli *rpc.Client){
+func doMapWork(response *Reply,mapf func(string, string) []KeyValue){
 
 	//接下来应该是读取文件，然后调用map函数
 	//这是什么数据结构，空数组？
@@ -169,31 +165,10 @@ func doMapWork(response *Reply,mapf func(string, string) []KeyValue,cli *rpc.Cli
 	//回送，表示完成
 	mapfinishRequest  :=Request{STATUS_CODE: STATUS_MAP_FINISH,Id: response.Id}
 	useLessResponse := Reply{}
-	err = cli.Call("Master.Process", mapfinishRequest, &useLessResponse)
+	call("Master.Process", mapfinishRequest, &useLessResponse)
 
 }
-//
-// example function to show how to make an RPC call to the master.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func CallExample() {
 
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	call("Master.Example", &args, &reply)
-
-	// reply.Y should be 100.
-	fmt.Printf("reply.Y %v\n", reply.Y)
-}
 
 //
 // send an RPC request to the master, wait for the response.

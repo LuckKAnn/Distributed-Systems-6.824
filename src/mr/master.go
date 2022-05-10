@@ -65,12 +65,11 @@ func (m *Master) Process(args Request, reply *Reply) error {
 					m.cached[args.Id] = false
 					reply.Work_index = index
 					//校验超时
-					go m.checkIfWorkerFail(args.Id,index)
+					go m.checkIfWorkerFail(args.Id,index,1)
 					break
 				}
 			}
 			//如果返回的filename为空，说明map任务分配完了
-
 			reply.Id = args.Id
 			reply.ReduceNum = m.reduceNum
 			reply.STATUS_CODE=STATUS_DO_MAP
@@ -88,7 +87,7 @@ func (m *Master) Process(args Request, reply *Reply) error {
 						m.files_deal[index] = true
 						m.cached[args.Id] = false
 						reply.Work_index = index
-						go m.checkIfWorkerFail(args.Id,index)
+						go m.checkIfWorkerFail(args.Id,index,2)
 						break
 					}
 				}
@@ -139,6 +138,8 @@ func (m *Master) Process(args Request, reply *Reply) error {
 			if m.reduceNum==0{
 				reply.STATUS_CODE=STATUS_END
 			}
+		} else {
+			log.Println("接收到超时的消息")
 		}
 		m.mutex.Unlock()
 
@@ -148,7 +149,7 @@ func (m *Master) Process(args Request, reply *Reply) error {
 
 	return nil
 }
-func (m *Master) checkIfWorkerFail(id int ,index int){
+func (m *Master) checkIfWorkerFail(id int ,index int,flag int){
 
 	/*睡眠十秒*/
 	time.Sleep(time.Second*10)
@@ -157,6 +158,12 @@ func (m *Master) checkIfWorkerFail(id int ,index int){
 	if ok {
 	//	存在，不做任何处理
 		if !b {
+
+			if flag==1 {
+				log.Printf("位于%d的消息超时,是map超时",index)
+			}else{
+				log.Printf("位于%d的消息超时,是reduce超时",index)
+			}
 		//	还没有完成，那么删除这个key
 			delete(m.cached,id)
 			//	说明这个任务当前还没有完成，应该把它设置为允许再分配
@@ -196,10 +203,10 @@ func (m *Master)deleteJsonFiles(pathname string) ( error) {
 func (m *Master) server() {
 	rpc.Register(m)
 	rpc.HandleHTTP()
-	l, e := net.Listen("tcp", ":8088")
-	//sockname := masterSock()
-	//os.Remove(sockname)
-	//l, e := net.Listen("unix", sockname)
+	//l, e := net.Listen("tcp", ":8088")
+	sockname := masterSock()
+	os.Remove(sockname)
+	l, e := net.Listen("unix", sockname)
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
